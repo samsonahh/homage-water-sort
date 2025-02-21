@@ -13,12 +13,29 @@ public class ContainerManager : MonoBehaviour
 
     public Container[] containers;
     public int emptyContainers = 2;
-    public Container selectedContainer;
-    public int completedContainers;
+    Container selectedContainer;
+
+    public int wins;
+    bool isRoundWon;
+    public float roundTimer;
+
+    Dictionary<Container, List<WaterColors>> cachedInitialRoundState = new();
+    public List<(Container, Container)> savedMoves = new();
 
     private void Awake()
     {
+        foreach(Container container in containers)
+        {
+            container.AssignContainerManager(this);
+        }
+
         SetupContainers();
+    }
+
+    private void Update()
+    {
+        CheckWin();
+        if (!isRoundWon && roundTimer < 10000) roundTimer += Time.deltaTime;
     }
 
     void SetupContainers()
@@ -47,14 +64,22 @@ public class ContainerManager : MonoBehaviour
         // Fill the non empty containers
         for(int i = 0; i < containers.Length; i++)
         {
-            if (emptyContainerIndices.Contains(i)) continue;
+            if (emptyContainerIndices.Contains(i))
+            {
+                cachedInitialRoundState.Add(containers[i], new());
+                continue;
+            }
+
+            List<WaterColors> containerColors = new();
             for(int j = 0; j < MAX_WATER_COUNT; j++)
             {
                 int randomIndex = Random.Range(0, possibleColors.Count);
                 WaterColors randomColor = possibleColors[randomIndex];
                 containers[i].ForceAddColor(randomColor);
+                containerColors.Add(randomColor);
                 possibleColors.RemoveAt(randomIndex);
             }
+            cachedInitialRoundState.Add(containers[i], containerColors);
         }
     }
 
@@ -84,20 +109,103 @@ public class ContainerManager : MonoBehaviour
         }
 
         WaterColors incomingColor = selectedContainer.GetNextColor()[0];
-        if (newContainer.TryAddColor(incomingColor)) selectedContainer.RemoveTopColor();
+        if (newContainer.TryAddColor(incomingColor))
+        {
+            selectedContainer.RemoveTopColor();
+            savedMoves.Add((selectedContainer, newContainer));
+        }
         newContainer.highlight.SetActive(false);
         newContainer.isSelected = false;
         selectedContainer.isSelected = false;
         selectedContainer.highlight.SetActive(false);
         selectedContainer = null;
     }
-    
-    public void CompleteContainer()
+
+    void CheckWin()
     {
-        completedContainers++;
-        if(completedContainers >= containers.Length - emptyContainers)
+        if (isRoundWon) return;
+
+        int completeCount = 0;
+        foreach(Container container in containers)
         {
-            Debug.Log("You win!");
+            if (container.IsComplete()) completeCount++;
         }
+
+        if(completeCount >= containers.Length - emptyContainers)
+        {
+            isRoundWon = true;
+            wins++;
+        }
+    }
+
+    void ClearAllContainers()
+    {
+        foreach(Container container in containers)
+        {
+            container.ClearContainer();
+        }
+    }
+
+    public void UndoMove()
+    {
+        if (isRoundWon) return;
+        if(savedMoves.Count == 0) return;
+
+        (Container removedContainer, Container addedContainer) = savedMoves[savedMoves.Count - 1];
+        removedContainer.ForceAddColor(addedContainer.GetNextColor()[0]);
+        addedContainer.RemoveTopColor();
+
+        savedMoves.RemoveAt(savedMoves.Count - 1);
+    }
+
+    public void ResetGame()
+    {
+        if (isRoundWon)
+        {
+            CreateNewGame();
+            return;
+        }
+
+        roundTimer = 0;
+        savedMoves.Clear();
+
+        ClearAllContainers();
+        foreach(var keyValue in cachedInitialRoundState)
+        {
+            Container container = keyValue.Key;
+            List<WaterColors> colors = keyValue.Value;
+
+            foreach(var color in colors)
+            {
+                container.ForceAddColor(color);
+            }
+        }
+    }
+
+    public void CreateNewGame()
+    {
+        isRoundWon = false;
+        roundTimer = 0;
+        savedMoves.Clear();
+        cachedInitialRoundState.Clear();
+
+        ClearAllContainers();
+        SetupContainers();
+    }
+
+    public void AddEmptyContainers()
+    {
+        if (emptyContainers + 1 == containers.Length - 1) return;
+
+        emptyContainers++;
+        CreateNewGame();
+    }
+
+    public void RemoveEmptyContainers()
+    {
+        if (emptyContainers - 1 == 0) return;
+
+        emptyContainers--;
+        CreateNewGame();
     }
 }
